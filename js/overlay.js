@@ -102,6 +102,7 @@
       if (S.on.ewAuto && S.ew) this.drawWave(ctx, g, S.ew.labels, S.ew, '#f5c542');
       if (S.manual.length) this.drawWave(ctx, g, S.manualLabels, S.manualInfo, '#4fc3f7');
       if (S.on.profile && S.liq) this.drawProfile(ctx, g);
+      this.drawDrawings(ctx, g);
       ctx.restore();
     }
 
@@ -223,6 +224,68 @@
       };
       if (info.invalidation) hline(info.invalidation.price, '무효화', '#ff5252', [6, 3]);
       for (const t of info.targets || []) hline(t.price, t.label, color, [2, 4]);
+    }
+
+    // 사용자가 그린 도형
+    drawDrawings(ctx, g) {
+      const S = this.S, G = ET.geo;
+      const list = (S.drawings || []).slice();
+      if (S.preview) list.push(Object.assign({ id: 'preview' }, S.preview));
+      if (!list.length) return;
+      const X = (p) => g.x(G.timeToIdx(S, p.time));
+      const P = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+      const pc = (v) => (v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%';
+      ctx.font = '11px -apple-system, "Segoe UI", sans-serif';
+      for (const d of list) {
+        const sel = d.id === S.selected, col = sel ? '#ffffff' : '#9fb4ff';
+        const x1 = X(d.p1), y1 = g.y(d.p1.price);
+        if (y1 == null) continue;
+        ctx.lineWidth = sel ? 2 : 1.25; ctx.strokeStyle = col; ctx.fillStyle = col; ctx.setLineDash([]);
+        const handle = (x, y) => { if (!sel) return; ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fillStyle = '#0b0d12'; ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.stroke(); };
+        if (d.type === 'hline') {
+          ctx.beginPath(); ctx.moveTo(0, y1 + 0.5); ctx.lineTo(g.w, y1 + 0.5); ctx.stroke();
+          ctx.textAlign = 'left'; ctx.fillText(P(d.p1.price), 44, y1 - 7);
+          handle(x1, y1);
+          continue;
+        }
+        const x2 = X(d.p2), y2 = g.y(d.p2.price);
+        if (y2 == null) continue;
+        if (d.type === 'trend') {
+          ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+        } else if (d.type === 'rect') {
+          ctx.fillStyle = 'rgba(159,180,255,0.10)'; ctx.fillRect(x1, y1, x2 - x1, y2 - y1); ctx.strokeRect(x1 + 0.5, y1 + 0.5, x2 - x1, y2 - y1);
+        } else if (d.type === 'fib') {
+          const xa = Math.min(x1, x2);
+          ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.setLineDash([]);
+          for (const L of G.FIB) {
+            const pr = G.fibPrice(d, L), y = g.y(pr);
+            if (y == null) continue;
+            ctx.strokeStyle = L === 0.618 || L === 0.5 ? '#f5c542' : col; ctx.globalAlpha = L === 0 || L === 1 ? 1 : 0.75;
+            ctx.beginPath(); ctx.moveTo(xa, y + 0.5); ctx.lineTo(g.w, y + 0.5); ctx.stroke();
+            ctx.fillStyle = ctx.strokeStyle; ctx.textAlign = 'left'; ctx.fillText(L + '  ' + P(pr), xa + 4, y - 7);
+            ctx.globalAlpha = 1;
+          }
+        } else if (d.type === 'long' || d.type === 'short') {
+          const p = G.position(d), ys = g.y(p.stop), yt = g.y(p.tp), xa = Math.min(x1, x2), w = Math.max(Math.abs(x2 - x1), 70);
+          if (ys == null || yt == null) continue;
+          ctx.fillStyle = 'rgba(239,83,80,0.18)'; ctx.fillRect(xa, Math.min(y1, ys), w, Math.abs(ys - y1));
+          ctx.fillStyle = 'rgba(38,166,154,0.18)'; ctx.fillRect(xa, Math.min(y1, yt), w, Math.abs(yt - y1));
+          ctx.strokeStyle = col; ctx.beginPath(); ctx.moveTo(xa, y1 + 0.5); ctx.lineTo(xa + w, y1 + 0.5); ctx.stroke();
+          const up = d.type === 'long';
+          ctx.textAlign = 'left';
+          ctx.fillStyle = '#26a69a'; ctx.fillText('익절 ' + P(p.tp) + ' (' + pc((p.tp - p.entry) / p.entry) + ')', xa + 4, yt + (up ? 9 : -8));
+          ctx.fillStyle = '#ef5350'; ctx.fillText('손절 ' + P(p.stop) + ' (' + pc((p.stop - p.entry) / p.entry) + ')', xa + 4, ys + (up ? -8 : 9));
+          ctx.fillStyle = col; ctx.fillText((up ? '롱 ' : '숏 ') + P(p.entry) + ' · 손익비 ' + p.rr + ':1', xa + 4, y1 + (up ? -8 : 9));
+        } else if (d.type === 'ruler') {
+          const dp = d.p2.price - d.p1.price, bars = Math.round(G.timeToIdx(S, d.p2.time) - G.timeToIdx(S, d.p1.time)), sec = Math.abs(d.p2.time - d.p1.time);
+          const dur = sec >= 86400 ? (sec / 86400).toFixed(1) + '일' : sec >= 3600 ? (sec / 3600).toFixed(1) + '시간' : Math.round(sec / 60) + '분';
+          ctx.fillStyle = dp >= 0 ? 'rgba(38,166,154,0.12)' : 'rgba(239,83,80,0.12)'; ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+          ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.setLineDash([]);
+          ctx.fillStyle = col; ctx.textAlign = 'center';
+          ctx.fillText((dp >= 0 ? '+' : '') + P(dp) + ' (' + pc(dp / d.p1.price) + ') · ' + Math.abs(bars) + '봉 · ' + dur, (x1 + x2) / 2, Math.min(y1, y2) - 9);
+        }
+        handle(x1, y1); handle(x2, y2);
+      }
     }
 
     // 코인글래스식 청산맵(가격대별 막대 + 누적선)을 차트 오른쪽에 겹쳐 그린다.

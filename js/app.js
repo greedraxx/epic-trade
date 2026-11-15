@@ -1,5 +1,5 @@
 (function () {
-  const ET = window.ET, D = ET.data, LC = window.LightweightCharts;
+  const ET = window.ET, X = ET.ex, LC = window.LightweightCharts;
   const $ = (id) => document.getElementById(id);
   const TFS = [['1', '1m'], ['5', '5m'], ['15', '15m'], ['30', '30m'], ['60', '1h'], ['240', '4h'], ['D', '1D'], ['W', '1W']];
   const LIQ_RANGES = { '1d': ['5min', 288], '3d': ['5min', 864], '1w': ['15min', 672], '2w': ['30min', 672], '1m': ['1h', 720], '3m': ['4h', 540] };
@@ -10,6 +10,9 @@
 
   const S = {
     symbol: store.get('symbol', 'BTCUSDT'),
+    wantSource: store.get('wantSource', 'BYBIT'), // 사용자가 고른 차트 거래소
+    source: 'BYBIT',                              // 실제로 캔들을 받고 있는 거래소
+    exState: {}, wsState: {}, magnet: store.get('magnet', true), drawings: [],
     tf: store.get('tf', '15'),
     tfSec: 900,
     candles: [],
@@ -27,7 +30,7 @@
     manual: [], manualLabels: [], manualInfo: null, manualMode: false,
     liqEvents: [], ticker: {}, ratio: null,
   };
-  let loadToken = 0, loadingOlder = false, noOlder = false, stream = null, liqTimer = null;
+  let loadToken = 0, loadingOlder = false, noOlder = false, streams = [], liqTimer = null;
 
   // ---------- 차트 ----------
   const pad = (n) => String(n).padStart(2, '0');
@@ -83,59 +86,80 @@
   // ---------- 로딩 ----------
   async function loadAll() {
     const token = ++loadToken;
-    S.tfSec = D.TF_SEC[S.tf];
+    S.tfSec = X.TF_SEC[S.tf];
     noOlder = false;
     status('불러오는 중…', true);
-    try {
-      const c = await D.klines(S.symbol, S.tf, { limit: 1000 });
-      if (token !== loadToken) return;
-      S.candles = c;
-      S.manual = store.get('manual.' + S.symbol, []);
-      S.liqEvents = store.get('liqs.' + S.symbol, []);
-      const prec = c.length && c[c.length - 1].close < 1000 ? 2 : 1;
-      candleSeries.applyOptions({ priceFormat: { type: 'price', precision: prec, minMove: Math.pow(10, -prec) } });
-      candleSeries.setData(c);
-      volSeries.setData(c.map(volBar));
-      oiSeries.setData([]);
-      chart.timeScale().setVisibleLogicalRange({ from: c.length - 220, to: c.length + 12 });
-      status('');
-      analyze();
-      subscribe();
-      loadOi(token);
-      loadLiq();
-      loadRatio();
-    } catch (e) {
-      if (token !== loadToken) return;
-      status('Bybit 데이터를 불러오지 못했습니다: ' + e.message + '\n\n· 인터넷 연결 / Bybit 접속 가능 지역인지 확인\n· 브라우저가 직접 호출을 막는 경우(CORS): 터미널에서 `node server.js` 실행 후 http://localhost:8787 접속');
+    // 선택한 거래소가 응답하지 않으면 나머지를 순서대로 시도한다. 전부 실패하면 빈 차트 + 오류.
+    const order = [S.wantSource].concat(X.list.map((e) => e.id).filter((id) => id !== S.wantSource));
+    let c = null;
+    const errs = [];
+    for (const id of order) {
+      try {
+        const r = await X[id].klines(S.symbol, S.tf, { limit: 1000 });
+        if (token !== loadToken) return;
+        if (r.length < 30) throw new Error('캔들 부족');
+        c = r; S.source = id;
+        break;
+      } catch (e) { if (token !== loadToken) return; errs.push(X[id].name + ': ' + e.message); }
     }
+    S.manual = store.get('manual.' + S.symbol, []);
+    S.drawings = store.get('draw.' + S.symbol, []);
+    S.liqEvents = store.get('liqs.' + S.symbol, []);
+    S.selected = null;
+    if (!c) {
+      S.candles = []; S.smc = S.ew = S.liq = null;
+      candleSeries.setData([]); volSeries.setData([]); oiSeries.setData([]);
+      closeStreams(); overlay.refresh(); renderPanel();
+      status('세 거래소 모두 캔들을 불러오지 못했습니다.\n' + errs.join('\n') + '\n\n· 인터넷 연결 / 거래소 접속 가능 지역인지 확인\n· 브라우저가 직접 호출을 막는 경우(CORS): `node server.js` 실행 후 http://localhost:8787 접속');
+      return;
+    }
+    S.candles = c;
+    const prec = c[c.length - 1].close < 1000 ? 2 : 1;
+    candleSeries.applyOptions({ priceFormat: { type: 'price', precision: prec, minMove: Math.pow(10, -prec) } });
+    candleSeries.setData(c);
+    volSeries.setData(c.map(volBar));
+    oiSeries.setData([]);
+    chart.timeScale().setVisibleLogicalRange({ from: c.length - 220, to: c.length + 12 });
+    status('');
+    analyze();
+    openStreams();
+    loadOi(token);
+    loadLiq();
+    loadRatio();
   }
 
   async function loadOi(token) {
-    const iv = D.TF_TO_OI[S.tf];
+    const iv = X.TF_TO_OI[S.tf];
     if (!iv) return;
     try {
-      const oi = await D.oiHistory(S.symbol, iv, 1000);
+      const oi = await X[S.source].oiHistory(S.symbol, iv, 1000);
       if (token !== loadToken) return;
       const times = new Set(S.candles.map((c) => c.time));
       oiSeries.setData(oi.filter((r) => times.has(r.time)).map((r) => ({ time: r.time, value: r.oi })));
     } catch (e) { console.warn('OI', e); }
   }
 
+  // 세 거래소의 캔들·OI를 각각 받아 합산 청산맵을 만든다. 실패한 거래소는 빼고 계산한다.
   async function loadLiq() {
     clearTimeout(liqTimer);
     const token = loadToken, sym = S.symbol, [iv, n] = LIQ_RANGES[S.liqRange];
-    try {
-      const [k, oi] = await Promise.all([D.klines(sym, D.OI_TO_KLINE[iv], { limit: n }), D.oiHistory(sym, iv, n + 1)]);
-      if (token !== loadToken) return;
-      S.liq = ET.liqmap.compute(k, oi);
-      overlay.refresh();
-      renderPanel();
-    } catch (e) { console.warn('liqmap', e); }
+    const res = await Promise.all(X.list.map(async (ex) => {
+      try {
+        const [klines, oi] = await Promise.all([ex.klines(sym, X.OI_TO_TF[iv], { limit: n }), ex.oiHistory(sym, iv, n + 1)]);
+        if (klines.length < 3 || oi.length < 2) throw new Error('데이터 부족');
+        return { id: ex.id, klines, oi, mmr: ex.mmr };
+      } catch (e) { return { id: ex.id, error: e.message || String(e) }; }
+    }));
+    if (token !== loadToken) return;
+    for (const r of res) S.exState[r.id] = r.error ? { ok: false, error: r.error } : { ok: true };
+    try { S.liq = ET.liqmap.computeMulti(res.filter((r) => !r.error)); } catch (e) { console.warn('liqmap', e); S.liq = null; }
+    overlay.refresh();
+    renderPanel();
     liqTimer = setTimeout(loadLiq, 120000); // 2분마다 재계산
   }
 
   async function loadRatio() {
-    try { S.ratio = await D.accountRatio(S.symbol, '1h'); renderPanel(); } catch (e) { console.warn('ratio', e); }
+    try { S.ratio = await X.BYBIT.accountRatio(S.symbol); renderPanel(); } catch (e) { S.ratio = null; }
   }
 
   async function loadOlder() {
@@ -143,7 +167,7 @@
     loadingOlder = true;
     const token = loadToken;
     try {
-      const older = await D.klines(S.symbol, S.tf, { limit: 1000, end: S.candles[0].time * 1000 - 1 });
+      const older = await X[S.source].klines(S.symbol, S.tf, { limit: 1000, end: S.candles[0].time * 1000 - 1 });
       if (token !== loadToken) return;
       const first = S.candles[0].time, add = older.filter((c) => c.time < first);
       if (!add.length) { noOlder = true; return; }
@@ -159,38 +183,39 @@
 
   // ---------- 실시간 ----------
   let analyzeTimer = null;
-  function onKline(m) {
-    for (const d of m.data || []) {
-      const bar = { time: Math.floor(d.start / 1000), open: +d.open, high: +d.high, low: +d.low, close: +d.close, volume: +d.volume };
-      const c = S.candles, last = c[c.length - 1];
-      if (!last || bar.time < last.time) continue;
-      const isNew = bar.time > last.time;
-      if (isNew) c.push(bar); else c[c.length - 1] = bar;
-      candleSeries.update(bar); volSeries.update(volBar(bar));
-      if (isNew || d.confirm) { clearTimeout(analyzeTimer); analyzeTimer = setTimeout(analyze, 300); } else overlay.refresh();
-    }
+  function onKline(bar) {
+    const c = S.candles, last = c[c.length - 1];
+    if (!last || bar.time < last.time) return;
+    const isNew = bar.time > last.time, b = { time: bar.time, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume };
+    if (isNew) c.push(b); else c[c.length - 1] = b;
+    candleSeries.update(b); volSeries.update(volBar(b));
+    if (isNew || bar.confirm) { clearTimeout(analyzeTimer); analyzeTimer = setTimeout(analyze, 300); } else overlay.refresh();
   }
-  function onLiq(m) {
-    const arr = Array.isArray(m.data) ? m.data : [m.data];
-    for (const d of arr) {
-      if (!d) continue;
-      const price = +d.p, size = +d.v;
-      // S=Buy → 롱 포지션이 청산됨 (Bybit 문서 기준)
-      S.liqEvents.push({ t: Math.floor(d.T / 1000), price, usd: price * size, side: d.S === 'Buy' ? 'long' : 'short' });
-    }
+  function onLiq(id, e) {
+    if (!(e.usd > 0)) return;
+    S.liqEvents.push({ t: e.t, price: e.price, usd: e.usd, side: e.side, ex: id });
     if (S.liqEvents.length > 3000) S.liqEvents = S.liqEvents.slice(-3000);
     store.set('liqs.' + S.symbol, S.liqEvents);
     overlay.refresh(); renderFeed();
   }
-  function onTicker(m) { Object.assign(S.ticker, m.data || {}); renderMarket(); }
-  function subscribe() {
-    const h = {};
-    h['kline.' + S.tf + '.' + S.symbol] = onKline;
-    h['allLiquidation.' + S.symbol] = onLiq;
-    h['tickers.' + S.symbol] = onTicker;
-    if (S.ticker.symbol !== S.symbol) S.ticker = { symbol: S.symbol };
-    if (!stream) stream = new D.Stream((st) => { $('conn').className = st; $('conn').title = '실시간: ' + st; });
-    stream.set(h);
+  function closeStreams() { streams.forEach((s) => s.close()); streams = []; }
+  // 차트 거래소는 캔들·시세·청산, 나머지 두 곳은 청산 스트림만 연다.
+  function openStreams() {
+    closeStreams();
+    S.ticker = {}; S.wsState = {};
+    const token = loadToken;
+    streams = X.list.map((ex) => ex.open(S.symbol, {
+      tf: ex.id === S.source ? S.tf : null,
+      onKline: (b) => token === loadToken && onKline(b),
+      onLiq: (e) => token === loadToken && onLiq(ex.id, e),
+      onTicker: (t) => { if (token === loadToken) { S.ticker = t; renderMarket(); } },
+      onStatus: (st) => {
+        if (token !== loadToken) return;
+        S.wsState[ex.id] = st;
+        if (ex.id === S.source) { $('conn').className = st; $('conn').title = ex.name + ' 실시간: ' + st; }
+        renderExchanges();
+      },
+    }));
   }
 
   // ---------- 패널 ----------
@@ -198,17 +223,29 @@
   const px = (v) => (v == null || isNaN(v) ? '–' : (+v).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
   const pct = (v, d) => (v >= 0 ? '+' : '') + (v * 100).toFixed(d == null ? 2 : d) + '%';
   function renderMarket() {
-    const t = S.ticker, r = S.ratio, fr = +t.fundingRate;
+    const t = S.ticker, r = S.ratio, fr = t.fundingRate;
+    const has = (v) => v != null && !isNaN(v);
+    const oiSum = S.liq ? S.liq.sources.reduce((a, x) => a + (x.oiUsd || 0), 0) : 0;
     $('pMarket').innerHTML =
-      '<span>현재가</span><span>' + px(t.lastPrice) + '</span>' +
+      '<span>현재가 (' + X[S.source].name + ')</span><span>' + px(t.lastPrice) + '</span>' +
       '<span>마크</span><span>' + px(t.markPrice) + '</span>' +
-      '<span>24h</span><span class="' + (+t.price24hPcnt >= 0 ? 'up' : 'dn') + '">' + (t.price24hPcnt != null ? pct(+t.price24hPcnt) : '–') + '</span>' +
-      '<span>펀딩비</span><span class="' + (fr >= 0 ? 'up' : 'dn') + '">' + (t.fundingRate != null ? pct(fr, 4) : '–') + '</span>' +
-      '<span>미결제약정</span><span>' + (t.openInterestValue != null ? '$' + U(+t.openInterestValue) : '–') + '</span>' +
-      '<span>롱/숏 계정비 (1h)</span><span>' + (r ? (r.buy * 100).toFixed(1) + ' / ' + (r.sell * 100).toFixed(1) : '–') + '</span>';
+      '<span>24h</span><span class="' + (t.price24hPcnt >= 0 ? 'up' : 'dn') + '">' + (has(t.price24hPcnt) ? pct(t.price24hPcnt) : '–') + '</span>' +
+      '<span>펀딩비</span><span class="' + (fr >= 0 ? 'up' : 'dn') + '">' + (has(fr) ? pct(fr, 4) : '–') + '</span>' +
+      '<span>미결제약정 합계</span><span>' + (oiSum ? '$' + U(oiSum) : '–') + '</span>' +
+      '<span>롱/숏 계정비 (Bybit 1h)</span><span>' + (r ? (r.buy * 100).toFixed(1) + ' / ' + (r.sell * 100).toFixed(1) : '–') + '</span>';
+  }
+  // 거래소별 연결 상태와 OI. 연결되지 않은 거래소는 합산에서 빠진다는 것을 그대로 보여 준다.
+  function renderExchanges() {
+    const src = S.liq ? S.liq.sources : [], tot = src.reduce((a, x) => a + (x.oiUsd || 0), 0);
+    $('pEx').innerHTML = X.list.map((ex) => {
+      const st = S.exState[ex.id], m = src.find((x) => x.id === ex.id), ws = S.wsState[ex.id] === 'open';
+      const state = !st ? '<span class="mute">확인 중</span>' : st.ok ? '<span class="up">연결</span>' : '<span class="dn" title="' + String(st.error).replace(/"/g, '') + '">미연결</span>';
+      return '<div class="row"><span>' + ex.name + (ex.id === S.source ? ' <span class="mute">· 차트</span>' : '') + '</span><span>' + state + (ws ? ' <span class="mute">· 실시간</span>' : '') + '</span><span>' +
+        (m && m.oiUsd ? '$' + U(m.oiUsd) + ' <span class="mute">' + (tot ? ((m.oiUsd / tot) * 100).toFixed(0) + '%' : '') + '</span>' : '<span class="mute">–</span>') + '</span></div>';
+    }).join('') + (src.length && src.length < X.list.length ? '<div class="note">미연결 거래소는 청산맵 합산에서 제외됩니다.</div>' : '');
   }
   function renderPanel() {
-    renderMarket();
+    renderMarket(); renderExchanges();
     const c = S.candles, price = c.length ? c[c.length - 1].close : 0;
     // 청산 밀집
     if (S.liq && price) {
@@ -217,7 +254,7 @@
       $('pClusters').innerHTML =
         '<div class="mute">위 (숏 청산) — 합계 $' + U(cl.totalShort) + '</div>' + rows(cl.short.sort((a, b) => b.price - a.price), 'up') +
         '<div class="mute" style="margin-top:5px">아래 (롱 청산) — 합계 $' + U(cl.totalLong) + '</div>' + rows(cl.long.sort((a, b) => b.price - a.price), 'dn') +
-        '<div class="note">Bybit OI 증가분 기반 <b>추정치</b>. 레버리지 분포는 가정값(10x 30% · 25x 35% · 50x 25% · 100x 10%)이라 금액은 상대 비교용입니다. OI 매칭률 ' + (S.liq.oiCoverage * 100).toFixed(0) + '%.</div>';
+        '<div class="note">' + S.liq.sources.map((x) => X[x.id].name).join(' + ') + ' OI 증가분 기반 <b>추정치</b>. 레버리지 분포는 가정값(10x 30% · 25x 35% · 50x 25% · 100x 10%)이라 금액은 상대 비교용입니다. OI 매칭률 ' + S.liq.sources.map((x) => (x.coverage * 100).toFixed(0) + '%').join(' / ') + '.</div>';
     } else $('pClusters').innerHTML = '<div class="mute">계산 중…</div>';
     // SMC
     if (S.smc) {
@@ -255,8 +292,8 @@
   function renderFeed() {
     const ev = S.liqEvents.slice(-40).reverse();
     $('pFeed').innerHTML = ev.length
-      ? ev.map((e) => '<div class="row"><span class="' + (e.side === 'long' ? 'dn' : 'up') + '">' + (e.side === 'long' ? '롱 청산' : '숏 청산') + '</span><span>' + px(e.price) + '</span><span>$' + U(e.usd) + '</span><span class="mute">' + fmtTime(e.t).slice(11) + '</span></div>').join('')
-      : '<div class="mute">대기 중… (Bybit는 과거 청산 내역을 공개 API로 제공하지 않아 접속 이후 체결분만 표시됩니다)</div>';
+      ? ev.map((e) => '<div class="row"><span class="' + (e.side === 'long' ? 'dn' : 'up') + '">' + (e.side === 'long' ? '롱' : '숏') + ' <span class="mute">' + (X[e.ex || 'BYBIT'].name) + '</span></span><span>' + px(e.price) + '</span><span>$' + U(e.usd) + '</span><span class="mute">' + fmtTime(e.t).slice(11) + '</span></div>').join('')
+      : '<div class="mute">대기 중… (거래소들이 과거 청산 내역을 공개 API로 제공하지 않아 접속 이후 체결분만 표시됩니다)</div>';
   }
 
   // ---------- 범례 / 클릭 ----------
@@ -278,16 +315,20 @@
     $('legend').innerHTML = h;
   });
 
-  chart.subscribeClick((p) => {
-    if (!S.manualMode || !p.point || p.logical == null) return;
-    const i = Math.round(p.logical), c = S.candles[i];
-    if (!c || S.manual.length >= 9) return;
-    const price = candleSeries.coordinateToPrice(p.point.y);
-    if (price == null) return;
-    // 클릭 위치에 가까운 쪽(고가/저가)에 스냅
-    S.manual.push({ time: c.time, price: Math.abs(price - c.high) < Math.abs(price - c.low) ? c.high : c.low });
-    saveManual();
+  const tools = ET.tools.init({
+    S, chart, series: candleSeries, el: $('chart'),
+    refresh: () => overlay.refresh(),
+    save: () => store.set('draw.' + S.symbol, S.drawings),
+    onTool: () => syncUi(),
+    // 수동 엘리엇: 클릭 위치에 가까운 쪽(고가/저가)에 스냅
+    onWave: (p) => {
+      const c = S.candles[p.idx];
+      if (!c || S.manual.length >= 9) return;
+      S.manual.push({ time: c.time, price: Math.abs(p.price - c.high) < Math.abs(p.price - c.low) ? c.high : c.low });
+      saveManual();
+    },
   });
+  window.__et.tools = tools;
   function saveManual() { store.set('manual.' + S.symbol, S.manual); resolveManual(); overlay.refresh(); renderPanel(); $('manualCount').textContent = S.manual.length < 9 ? '다음: ' + ET.elliott.NAMES[S.manual.length] : '완료 (9/9)'; }
 
   // ---------- 툴바 ----------
@@ -301,6 +342,9 @@
     document.querySelectorAll('[data-layer]').forEach((b) => b.classList.toggle('on', !!S.layer[b.dataset.layer]));
     document.body.classList.toggle('panel-closed', !S.panel);
     $('btnPanel').classList.toggle('on', S.panel);
+    S.manualMode = S.tool === 'wave';
+    document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === S.tool));
+    $('magnet').classList.toggle('on', S.magnet);
     $('manualBar').style.display = S.manualMode ? 'flex' : 'none';
     $('manualCount').textContent = S.manual.length < 9 ? '다음: ' + ET.elliott.NAMES[S.manual.length] : '완료 (9/9)';
   };
@@ -308,6 +352,7 @@
   document.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     const k = b && b.dataset.on, l = b && b.dataset.layer;
+    if (b && b.dataset.tool) tools.setTool(S.tool === b.dataset.tool ? 'cursor' : b.dataset.tool);
     if (k) { S.detail[k] = !S.detail[k]; store.set('detail', S.detail); }
     else if (l) { S.layer[l] = !S.layer[l]; store.set('layer', S.layer); }
     if (k || l) { syncUi(); analyze(); overlay.refresh(); }
@@ -317,12 +362,15 @@
   $('btnSettings').addEventListener('click', () => $('settings').classList.toggle('open'));
   $('btnPanel').addEventListener('click', () => { S.panel = !S.panel; store.set('panel', S.panel); syncUi(); });
   const bind = (id, key, num, fn) => { $(id).value = S[key]; $(id).addEventListener('input', (e) => { S[key] = num ? +e.target.value : e.target.value; store.set(key, S[key]); fn(); }); };
-  bind('symbol', 'symbol', false, () => { S.liq = null; loadAll(); });
+  bind('symbol', 'symbol', false, () => { S.liq = null; S.exState = {}; loadAll(); });
+  bind('source', 'wantSource', false, loadAll);
+  $('magnet').addEventListener('click', () => { S.magnet = !S.magnet; store.set('magnet', S.magnet); syncUi(); });
+  $('trash').addEventListener('click', () => { if (!tools.removeSelected() && S.drawings.length && confirm('그린 도형을 모두 지울까요?')) tools.clearAll(); });
   bind('liqRange', 'liqRange', false, () => { S.liq = null; overlay.refresh(); renderPanel(); loadLiq(); });
   bind('intensity', 'intensity', true, () => overlay.refresh());
   bind('smcLen', 'smcLen', true, analyze);
   bind('ewMult', 'ewMult', true, analyze);
-  const setManual = (v) => { S.manualMode = v; $('settings').classList.remove('open'); syncUi(); renderPanel(); };
+  const setManual = (v) => { $('settings').classList.remove('open'); tools.setTool(v ? 'wave' : 'cursor'); renderPanel(); };
   $('ewManual').addEventListener('click', () => setManual(true));
   $('ewDone').addEventListener('click', () => setManual(false));
   $('ewUndo').addEventListener('click', () => { S.manual.pop(); saveManual(); syncUi(); });

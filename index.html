@@ -32,6 +32,10 @@
 </header>
 
 <div id="settings" role="dialog" aria-label="설정">
+  <h4>차트</h4>
+  <label>캔들 거래소
+    <select id="source"><option value="BYBIT">Bybit</option><option value="BINANCE">Binance</option><option value="OKX">OKX</option></select>
+  </label>
   <h4>청산</h4>
   <div class="chips">
     <button data-on="heatmap">히트맵</button><button data-on="profile">청산맵</button><button data-on="liqs">실청산</button>
@@ -62,6 +66,19 @@
 <main>
   <div id="chartwrap">
     <div id="chart"></div>
+    <div id="tools">
+      <button data-tool="cursor" title="선택" aria-label="선택"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l11 8-5 1-2 5z"/></svg></button>
+      <button data-tool="trend" title="추세선" aria-label="추세선"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18L19 6"/><circle cx="5" cy="18" r="1.6"/><circle cx="19" cy="6" r="1.6"/></svg></button>
+      <button data-tool="hline" title="수평선" aria-label="수평선"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18"/><circle cx="12" cy="12" r="1.6"/></svg></button>
+      <button data-tool="rect" title="사각형" aria-label="사각형"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="7" width="14" height="10" rx="1"/></svg></button>
+      <button data-tool="fib" title="피보나치 되돌림" aria-label="피보나치 되돌림"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 10h16M4 15h16M4 19h16"/></svg></button>
+      <button data-tool="long" title="롱 포지션 (진입 → 손절 순서로 클릭)" aria-label="롱 포지션 (진입 → 손절 순서로 클릭)"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17l5-5 3 3 6-7"/><path d="M15 8h4v4"/></svg></button>
+      <button data-tool="short" title="숏 포지션 (진입 → 손절 순서로 클릭)" aria-label="숏 포지션 (진입 → 손절 순서로 클릭)"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7l5 5 3-3 6 7"/><path d="M15 16h4v-4"/></svg></button>
+      <button data-tool="ruler" title="자 (가격·기간 측정)" aria-label="자 (가격·기간 측정)"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16L16 4l4 4L8 20z"/><path d="M8 12l2 2M11 9l2 2M14 6l2 2"/></svg></button>
+      <span class="tsep"></span>
+      <button id="magnet" title="자석: 시가·고가·저가·종가에 붙이기" aria-label="자석"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v8a6 6 0 0012 0V4"/><path d="M6 8h4M14 8h4"/></svg></button>
+      <button id="trash" title="선택한 도형 삭제 (선택이 없으면 전체 삭제)" aria-label="삭제"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button>
+    </div>
     <div id="legend"></div>
     <div id="status"></div>
     <div id="manualBar">
@@ -73,6 +90,7 @@
   </div>
   <aside id="panel">
     <section><h3>시장</h3><div id="pMarket" class="kv"></div></section>
+    <section><h3>거래소</h3><div id="pEx"></div></section>
     <section><h3>청산 밀집 구간 · 추정</h3><div id="pClusters"></div></section>
     <section><h3>SMC</h3><div id="pSmc" class="kv"></div></section>
     <section><h3>엘리엇</h3><div id="pEw"></div></section>
@@ -80,10 +98,11 @@
   </aside>
 </main>
 <script src="vendor/lightweight-charts.standalone.production.js"></script>
-<script src="js/data.js"></script>
+<script src="js/exchanges.js"></script>
 <script src="js/liqmap.js"></script>
 <script src="js/smc.js"></script>
 <script src="js/elliott.js"></script>
+<script src="js/tools.js"></script>
 <script src="js/overlay.js"></script>
 <script src="js/app.js"></script>
 </body>

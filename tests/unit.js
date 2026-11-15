@@ -51,6 +51,22 @@ test('liqmap: 가격이 지나가면 소멸, OI 감소 시 비례 축소', () =>
   assert.ok(cl.short[0].dist > 0);
 });
 
+test('liqmap: 여러 거래소는 같은 구간에 달러 금액 그대로 합산, 거래소별 MMR 적용', () => {
+  const mk = (oiAdd) => { const k = [], oi = []; for (let i = 0; i < 10; i++) { k.push(bar(i * 300, 100000, 100050, 99950, 100000)); oi.push({ time: i * 300, oi: i >= 4 ? 1000 + oiAdd : 1000 }); } oi.push({ time: 3000, oi: 1000 + oiAdd }); return { k, oi }; };
+  const a = mk(100), b = mk(300), tiers = [{ lev: 10, w: 1 }];
+  const m = liqmap.computeMulti([{ id: 'A', klines: a.k, oi: a.oi, mmr: 0.005 }, { id: 'B', klines: b.k.slice(2), oi: b.oi, mmr: 0.004 }], { tiers });
+  const one = liqmap.compute(a.k, a.oi, { tiers, mmr: 0.005 });
+  assert.strictEqual(m.sources.length, 2);
+  assert.ok(Math.abs(m.sources[1].usd / m.sources[0].usd - 3) < 1e-9, 'OI 증가분에 비례');
+  const sum = (x) => { let v = 0; for (let b2 = 0; b2 < x.n; b2++) v += x.active[0][0][b2] + x.active[1][0][b2]; return v; };
+  assert.ok(Math.abs(sum(m) - 4 * sum(one)) < 1, '합계 = 두 거래소의 합');
+  const entry = (100050 + 99950 + 100000) / 3;
+  const binA = Math.floor((entry * 0.905 - m.min) / m.step), binB = Math.floor((entry * 0.904 - m.min) / m.step);
+  assert.ok(binA !== binB && m.active[0][0][binA] > 0 && m.active[0][0][binB] > 0, 'MMR이 다르면 청산가 구간도 다름');
+  assert.ok(Math.abs(m.sources[0].oiUsd - 1100 * 100000) < 1);
+  assert.strictEqual(liqmap.computeMulti([{ id: 'X', klines: [], oi: [] }]), null, '데이터 없는 거래소만 있으면 null');
+});
+
 test('smc: 상승 BOS → 하락 전환 CHoCH, 오더블록 생성', () => {
   const c = path([100, 120, 110, 135, 122, 150, 140, 143, 105], 12);
   const s = smc.analyze(c, { len: 3 });
