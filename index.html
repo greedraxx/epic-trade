@@ -2,59 +2,81 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Epic Trade — 청산맵 · SMC · 엘리엇</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d12">
+<title>Epic Trade</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header id="bar">
-  <select id="symbol" title="심볼">
+  <select id="symbol" aria-label="심볼">
     <option>BTCUSDT</option><option>ETHUSDT</option><option>SOLUSDT</option>
   </select>
-  <div id="tfs" class="group"></div>
-  <span class="sep"></span>
-  <div class="group" id="toggles">
-    <span class="glabel">청산</span>
-    <button data-on="heatmap" title="추정 청산 히트맵">히트맵</button>
-    <button data-on="profile" title="가격대별 추정 청산 규모 + 누적">청산맵</button>
-    <button data-on="liqs" title="Bybit 실제 청산 체결 (접속 이후 수집분)">실청산</button>
-    <select id="liqRange" title="청산맵 계산 기간">
-      <option value="1d">24시간</option><option value="3d" selected>3일</option><option value="1w">1주</option>
+  <div id="tfs" class="seg"></div>
+  <span class="spacer"></span>
+  <div class="seg" id="layers">
+    <button data-layer="liq">청산</button>
+    <button data-layer="smc">SMC</button>
+    <button data-layer="ew">엘리엇</button>
+  </div>
+  <button id="btnSettings" class="icon" aria-label="설정" title="설정">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 12h3M11 12h9M4 17h12M20 17h0"/><circle cx="16" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="18" cy="17" r="2"/></svg>
+  </button>
+  <button id="btnPanel" class="icon" aria-label="정보 패널" title="정보 패널">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M14.5 4.5v15"/></svg>
+  </button>
+  <span id="conn" title="실시간 연결 상태"></span>
+</header>
+
+<div id="settings" role="dialog" aria-label="설정">
+  <h4>청산</h4>
+  <div class="chips">
+    <button data-on="heatmap">히트맵</button><button data-on="profile">청산맵</button><button data-on="liqs">실청산</button>
+  </div>
+  <label>계산 기간
+    <select id="liqRange">
+      <option value="1d">24시간</option><option value="3d">3일</option><option value="1w">1주</option>
       <option value="2w">2주</option><option value="1m">1개월</option><option value="3m">3개월</option>
     </select>
-    <input id="intensity" type="range" min="0.3" max="4" step="0.1" value="1" title="히트맵 강도">
-    <span class="glabel">SMC</span>
-    <button data-on="structure">구조</button>
-    <button data-on="ob">OB</button>
-    <button data-on="fvg">FVG</button>
-    <button data-on="eq">EQH/L</button>
-    <button data-on="pd">P/D</button>
-    <select id="smcLen" title="스윙 피벗 길이(좌우 봉 수)">
-      <option value="3">스윙 3</option><option value="5" selected>스윙 5</option><option value="10">스윙 10</option><option value="20">스윙 20</option><option value="50">스윙 50</option>
-    </select>
-    <span class="glabel">엘리엇</span>
-    <button data-on="ewAuto">자동</button>
-    <select id="ewMult" title="파동 크기(지그재그 반전 폭 = ATR 배수)">
-      <option value="0">크기 자동</option><option value="2">소 (2 ATR)</option><option value="4">중 (4 ATR)</option><option value="6">대 (6 ATR)</option><option value="9">특대 (9 ATR)</option>
-    </select>
-    <button id="ewManual" title="차트를 클릭해 0-1-2-3-4-5-A-B-C 순서로 찍기">수동</button>
-    <button id="ewUndo" title="마지막 점 취소">↶</button>
-    <button id="ewClear" title="수동 카운트 지우기">✕</button>
+  </label>
+  <label>히트맵 강도 <input id="intensity" type="range" min="0.3" max="4" step="0.1"></label>
+  <h4>SMC</h4>
+  <div class="chips">
+    <button data-on="structure">구조</button><button data-on="ob">오더블록</button><button data-on="fvg">FVG</button>
+    <button data-on="eq">EQH/EQL</button><button data-on="pd">프리미엄/디스카운트</button>
   </div>
-  <span id="conn" title="실시간 연결 상태">●</span>
-</header>
+  <label>스윙 길이
+    <select id="smcLen"><option value="3">3</option><option value="5">5</option><option value="10">10</option><option value="20">20</option><option value="50">50</option></select>
+  </label>
+  <h4>엘리엇</h4>
+  <div class="chips"><button data-on="ewAuto">자동 카운트</button></div>
+  <label>파동 크기
+    <select id="ewMult"><option value="0">자동</option><option value="2">소</option><option value="4">중</option><option value="6">대</option><option value="9">특대</option></select>
+  </label>
+  <button id="ewManual" class="wide">수동 카운트 시작</button>
+</div>
+
 <main>
   <div id="chartwrap">
     <div id="chart"></div>
     <div id="legend"></div>
     <div id="status"></div>
+    <div id="manualBar">
+      <span>수동 카운트</span><span id="manualCount" class="mute"></span>
+      <button id="ewUndo" title="마지막 점 취소">되돌리기</button>
+      <button id="ewClear" title="모두 지우기">지우기</button>
+      <button id="ewDone" class="primary">완료</button>
+    </div>
   </div>
   <aside id="panel">
     <section><h3>시장</h3><div id="pMarket" class="kv"></div></section>
-    <section><h3>추정 청산 밀집 구간</h3><div id="pClusters"></div></section>
+    <section><h3>청산 밀집 구간 · 추정</h3><div id="pClusters"></div></section>
     <section><h3>SMC</h3><div id="pSmc" class="kv"></div></section>
-    <section><h3>엘리엇 파동</h3><div id="pEw"></div></section>
-    <section><h3>실시간 청산 (Bybit)</h3><div id="pFeed"></div></section>
+    <section><h3>엘리엇</h3><div id="pEw"></div></section>
+    <section><h3>실시간 청산</h3><div id="pFeed"></div></section>
   </aside>
 </main>
 <script src="vendor/lightweight-charts.standalone.production.js"></script>

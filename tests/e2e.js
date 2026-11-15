@@ -101,14 +101,19 @@ function kline(t, sec) {
   await page.evaluate(() => { const n = window.__et.S.candles.length; window.__et.chart.timeScale().setVisibleLogicalRange({ from: n - 260, to: n + 14 }); });
 
   // 수동 엘리엇: 3점 찍기
-  await page.click('#ewManual');
+  await page.click('#btnSettings'); await page.click('#ewManual');
   const box = await page.locator('#chart').boundingBox();
   for (const [fx, fy] of [[0.3, 0.6], [0.4, 0.4], [0.5, 0.5]]) { await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy); await page.waitForTimeout(700); }
   const manual = await page.evaluate(() => ({ n: window.__et.S.manual.length, labels: window.__et.S.manualLabels.length, stage: window.__et.S.manualInfo.stage }));
   console.log('manual', manual);
   assert.strictEqual(manual.n, 3);
   assert.strictEqual(manual.labels, 3);
-  await page.click('#ewClear'); await page.click('#ewManual');
+  await page.click('#ewClear'); await page.click('#ewDone');
+  // 레이어 마스터 스위치
+  await page.click('[data-layer="liq"]');
+  assert.strictEqual(await page.evaluate(() => window.__et.S.on.heatmap), false);
+  await page.click('[data-layer="liq"]');
+  assert.strictEqual(await page.evaluate(() => window.__et.S.on.heatmap), true);
 
   // 타임프레임 전환
   await page.click('[data-tf="60"]');
@@ -120,6 +125,12 @@ function kline(t, sec) {
     await page.waitForFunction(() => window.__et.S.tf === '15' && window.__et.S.candles.length === 1000, null, { timeout: 8000 });
     await page.waitForTimeout(700);
     await page.screenshot({ path: process.argv[2] });
+    await page.click('#btnSettings'); await page.waitForTimeout(200);
+    await page.screenshot({ path: process.argv[2].replace('.png', '-settings.png') });
+    await page.click('#chart', { position: { x: 200, y: 300 } });
+    await page.setViewportSize({ width: 390, height: 760 }); await page.waitForTimeout(500);
+    await page.click('#btnPanel'); await page.waitForTimeout(300);
+    await page.screenshot({ path: process.argv[2].replace('.png', '-mobile.png') });
   }
   assert.deepStrictEqual(errors, [], '콘솔 오류 없음');
   await browser.close();

@@ -13,7 +13,11 @@
     tf: store.get('tf', '15'),
     tfSec: 900,
     candles: [],
-    on: Object.assign({ heatmap: true, profile: true, liqs: true, structure: true, ob: true, fvg: true, eq: true, pd: false, ewAuto: true }, store.get('on', {})),
+    // detail: 세부 표시 항목, layer: 상단 3개 마스터 스위치, on: 둘을 합친 실제 표시 여부
+    detail: Object.assign({ heatmap: true, profile: true, liqs: true, structure: true, ob: true, fvg: true, eq: false, pd: false, ewAuto: true }, store.get('detail', {})),
+    layer: Object.assign({ liq: true, smc: true, ew: true }, store.get('layer', {})),
+    on: {},
+    panel: store.get('panel', window.innerWidth > 900),
     liqRange: store.get('liqRange', '3d'),
     intensity: store.get('intensity', 1),
     smcLen: store.get('smcLen', 5),
@@ -30,12 +34,12 @@
   const fmtTime = (t) => { const d = new Date(t * 1000); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); };
   const chart = LC.createChart($('chart'), {
     autoSize: true,
-    layout: { background: { color: '#0f1218' }, textColor: '#9aa1b2', fontSize: 11, panes: { separatorColor: '#262b38' } },
-    grid: { vertLines: { color: '#171b25' }, horzLines: { color: '#171b25' } },
+    layout: { background: { color: '#0b0d12' }, textColor: '#6b7280', fontSize: 11, attributionLogo: true, panes: { separatorColor: '#1c2029' } },
+    grid: { vertLines: { visible: false }, horzLines: { color: '#12151c' } },
     crosshair: { mode: LC.CrosshairMode.Normal },
-    rightPriceScale: { borderColor: '#262b38' },
+    rightPriceScale: { borderColor: '#1c2029' },
     timeScale: {
-      borderColor: '#262b38', timeVisible: true, rightOffset: 12,
+      borderColor: '#1c2029', timeVisible: true, rightOffset: 12,
       tickMarkFormatter: (t, type) => { const d = new Date(t * 1000); return type === 0 ? String(d.getFullYear()) : type === 1 ? d.getMonth() + 1 + '월' : type === 2 ? d.getMonth() + 1 + '/' + d.getDate() : pad(d.getHours()) + ':' + pad(d.getMinutes()); },
     },
     localization: { timeFormatter: fmtTime },
@@ -262,14 +266,13 @@
     if (!bar && c.length) bar = c[c.length - 1];
     if (!bar) { $('legend').innerHTML = ''; return; }
     const up = bar.close >= bar.open;
-    let h = '<b>' + S.symbol + '</b> · Bybit 무기한 · ' + TFS.find((t) => t[0] === S.tf)[1] +
-      ' &nbsp;<span class="' + (up ? 'up' : 'dn') + '">O ' + px(bar.open) + ' H ' + px(bar.high) + ' L ' + px(bar.low) + ' C ' + px(bar.close) + ' (' + pct((bar.close - bar.open) / bar.open) + ')</span>';
+    let h = '<span class="' + (up ? 'up' : 'dn') + '">O ' + px(bar.open) + ' H ' + px(bar.high) + ' L ' + px(bar.low) + ' C ' + px(bar.close) + ' (' + pct((bar.close - bar.open) / bar.open) + ')</span>';
     if (p && p.point && S.liq && S.on.heatmap) {
       const price = candleSeries.coordinateToPrice(p.point.y), m = S.liq;
       if (price != null) {
         const b = Math.floor((price - m.min) / m.step);
         const v = b >= 0 && b < m.n ? m.grid[(m.T - 1) * m.n + b] : 0;
-        h += '<br><span class="mute">커서 ' + px(price) + ' · 현재 추정 청산 대기 </span>' + (v > 0 ? '<span class="warnc">$' + U(v) + '</span>' : '<span class="mute">없음</span>');
+        h += ' &nbsp;<span class="mute">· 커서 ' + px(price) + ' · 현재 추정 청산 대기 </span>' + (v > 0 ? '<span class="warnc">$' + U(v) + '</span>' : '<span class="mute">없음</span>');
       }
     }
     $('legend').innerHTML = h;
@@ -285,33 +288,48 @@
     S.manual.push({ time: c.time, price: Math.abs(price - c.high) < Math.abs(price - c.low) ? c.high : c.low });
     saveManual();
   });
-  function saveManual() { store.set('manual.' + S.symbol, S.manual); resolveManual(); overlay.refresh(); renderPanel(); }
+  function saveManual() { store.set('manual.' + S.symbol, S.manual); resolveManual(); overlay.refresh(); renderPanel(); $('manualCount').textContent = S.manual.length < 9 ? '다음: ' + ET.elliott.NAMES[S.manual.length] : '완료 (9/9)'; }
 
   // ---------- 툴바 ----------
+  const GROUP = { heatmap: 'liq', profile: 'liq', liqs: 'liq', structure: 'smc', ob: 'smc', fvg: 'smc', eq: 'smc', pd: 'smc', ewAuto: 'ew' };
+  const applyLayers = () => { for (const k in GROUP) S.on[k] = !!S.detail[k] && !!S.layer[GROUP[k]]; };
   $('tfs').innerHTML = TFS.map((t) => '<button data-tf="' + t[0] + '">' + t[1] + '</button>').join('');
   const syncUi = () => {
+    applyLayers();
     document.querySelectorAll('[data-tf]').forEach((b) => b.classList.toggle('on', b.dataset.tf === S.tf));
-    document.querySelectorAll('[data-on]').forEach((b) => b.classList.toggle('on', !!S.on[b.dataset.on]));
-    $('ewManual').className = 'warn' + (S.manualMode ? ' on' : '');
+    document.querySelectorAll('[data-on]').forEach((b) => b.classList.toggle('on', !!S.detail[b.dataset.on]));
+    document.querySelectorAll('[data-layer]').forEach((b) => b.classList.toggle('on', !!S.layer[b.dataset.layer]));
+    document.body.classList.toggle('panel-closed', !S.panel);
+    $('btnPanel').classList.toggle('on', S.panel);
+    $('manualBar').style.display = S.manualMode ? 'flex' : 'none';
+    $('manualCount').textContent = S.manual.length < 9 ? '다음: ' + ET.elliott.NAMES[S.manual.length] : '완료 (9/9)';
   };
   $('tfs').addEventListener('click', (e) => { const tf = e.target.dataset.tf; if (!tf || tf === S.tf) return; S.tf = tf; store.set('tf', tf); syncUi(); loadAll(); });
-  $('toggles').addEventListener('click', (e) => {
-    const k = e.target.dataset.on;
-    if (!k) return;
-    S.on[k] = !S.on[k]; store.set('on', S.on); syncUi();
-    if (k === 'ewAuto') analyze(); else { overlay.refresh(); renderPanel(); }
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    const k = b && b.dataset.on, l = b && b.dataset.layer;
+    if (k) { S.detail[k] = !S.detail[k]; store.set('detail', S.detail); }
+    else if (l) { S.layer[l] = !S.layer[l]; store.set('layer', S.layer); }
+    if (k || l) { syncUi(); analyze(); overlay.refresh(); }
+    // 설정 창: 바깥을 누르면 닫힘
+    if (!e.target.closest('#settings') && !e.target.closest('#btnSettings')) $('settings').classList.remove('open');
   });
+  $('btnSettings').addEventListener('click', () => $('settings').classList.toggle('open'));
+  $('btnPanel').addEventListener('click', () => { S.panel = !S.panel; store.set('panel', S.panel); syncUi(); });
   const bind = (id, key, num, fn) => { $(id).value = S[key]; $(id).addEventListener('input', (e) => { S[key] = num ? +e.target.value : e.target.value; store.set(key, S[key]); fn(); }); };
   bind('symbol', 'symbol', false, () => { S.liq = null; loadAll(); });
   bind('liqRange', 'liqRange', false, () => { S.liq = null; overlay.refresh(); renderPanel(); loadLiq(); });
   bind('intensity', 'intensity', true, () => overlay.refresh());
   bind('smcLen', 'smcLen', true, analyze);
   bind('ewMult', 'ewMult', true, analyze);
-  $('ewManual').addEventListener('click', () => { S.manualMode = !S.manualMode; syncUi(); renderPanel(); });
-  $('ewUndo').addEventListener('click', () => { S.manual.pop(); saveManual(); });
-  $('ewClear').addEventListener('click', () => { S.manual = []; saveManual(); });
+  const setManual = (v) => { S.manualMode = v; $('settings').classList.remove('open'); syncUi(); renderPanel(); };
+  $('ewManual').addEventListener('click', () => setManual(true));
+  $('ewDone').addEventListener('click', () => setManual(false));
+  $('ewUndo').addEventListener('click', () => { S.manual.pop(); saveManual(); syncUi(); });
+  $('ewClear').addEventListener('click', () => { S.manual = []; saveManual(); syncUi(); });
 
   syncUi();
   loadAll();
   setInterval(loadRatio, 300000);
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
 })();

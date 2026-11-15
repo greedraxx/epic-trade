@@ -2,13 +2,9 @@
 (function (root) {
   const ET = (root.ET = root.ET || {});
 
-  const STOPS = [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]];
+  // 단색(호박색) 32단계 — 농도만으로 크기를 표현한다
   const PALETTE = [];
-  for (let i = 0; i < 32; i++) {
-    const f = (i / 31) * (STOPS.length - 1), a = Math.floor(f), b = Math.min(STOPS.length - 1, a + 1), r = f - a;
-    const ch = (k) => Math.round(STOPS[a][k] + (STOPS[b][k] - STOPS[a][k]) * r);
-    PALETTE.push('rgba(' + ch(0) + ',' + ch(1) + ',' + ch(2) + ',' + (0.10 + 0.75 * (i / 31)).toFixed(2) + ')');
-  }
+  for (let i = 0; i < 32; i++) PALETTE.push('rgba(245,197,66,' + (0.06 + 0.62 * Math.pow(i / 31, 1.4)).toFixed(3) + ')');
   const TIER_LONG = ['#7a2a35', '#b33a48', '#e0525f', '#ff8a8f'];
   const TIER_SHORT = ['#1f6b57', '#2a9477', '#3cc49b', '#86ecc9'];
   const fmtUsd = (v) => (v >= 1e9 ? (v / 1e9).toFixed(2) + 'B' : v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v >= 1e3 ? (v / 1e3).toFixed(0) + 'K' : v.toFixed(0));
@@ -76,7 +72,7 @@
           let bucket = -1;
           if (i <= b && cols[i] >= 0) {
             const v = m.grid[cols[i] * m.n + r];
-            if (v > 0) { const nrm = Math.min(1, Math.pow(v * scale, 0.8)); if (nrm >= 0.12) bucket = Math.round(nrm * 31); }
+            if (v > 0) { const nrm = Math.min(1, Math.pow(v * scale, 0.8)); if (nrm >= 0.2) bucket = Math.round(nrm * 31); }
           }
           if (bucket !== runBucket) {
             if (runBucket >= 0) { ctx.fillStyle = PALETTE[runBucket]; ctx.fillRect(g.x(runStart) - g.bs / 2, y2, (i - runStart) * g.bs, hgt); }
@@ -88,7 +84,7 @@
         if (v > 0) {
           const nrm = Math.min(1, Math.pow(v * scale, 0.8));
           const xe = g.x(S.candles.length - 1) + g.bs / 2;
-          if (nrm >= 0.12 && xe < g.w) { ctx.fillStyle = PALETTE[Math.round(nrm * 31)]; ctx.fillRect(xe, y2, g.w - xe, hgt); }
+          if (nrm >= 0.2 && xe < g.w) { ctx.fillStyle = PALETTE[Math.round(nrm * 31)]; ctx.fillRect(xe, y2, g.w - xe, hgt); }
         }
       }
     }
@@ -121,8 +117,8 @@
       };
       if (S.on.fvg) {
         // 미충족 FVG 전부 + 최근에 메워진 것 일부
-        for (const f of s.fvgs) {
-          if (f.endIdx != null && f.endIdx < last - 300) continue;
+        const openFvg = s.fvgs.filter((f) => f.endIdx == null).slice(-12); // 미충족 최근 12개만
+        for (const f of openFvg) {
           if (!vis(f.idx, f.endIdx == null ? Infinity : f.endIdx)) continue;
           const open = f.endIdx == null;
           box(f.idx, f.endIdx, f.top, f.bottom, f.dir === 1 ? (open ? 'rgba(38,166,154,0.22)' : 'rgba(38,166,154,0.07)') : (open ? 'rgba(239,83,80,0.22)' : 'rgba(239,83,80,0.07)'), null, open ? 'FVG' : '');
@@ -147,12 +143,6 @@
           ctx.setLineDash([]);
           ctx.fillStyle = col; ctx.textAlign = 'center';
           ctx.fillText(st.type, (g.x(st.fromIdx) + g.x(st.toIdx)) / 2, y + (st.dir === 1 ? -8 : 9));
-        }
-        ctx.fillStyle = 'rgba(200,205,215,0.75)'; ctx.textAlign = 'center';
-        for (const sw of s.swings) {
-          if (sw.idx < g.from || sw.idx > g.to) continue;
-          const y = g.y(sw.price);
-          if (y != null) ctx.fillText(sw.label, g.x(sw.idx), y + (sw.type === 'H' ? -9 : 10));
         }
       }
       if (S.on.eq) {
@@ -229,7 +219,7 @@
         ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.setLineDash(dash);
         ctx.beginPath(); ctx.moveTo(xl, y + 0.5); ctx.lineTo(g.w, y + 0.5); ctx.stroke(); ctx.setLineDash([]);
         ctx.fillStyle = col; ctx.textAlign = 'right';
-        ctx.fillText(text + ' ' + price.toFixed(1), g.w - (this.S.on.profile ? g.w * 0.2 : 6), y - 7);
+        ctx.fillText(text + ' ' + price.toFixed(1), g.w - (this.S.on.profile ? Math.min(g.w * 0.16, 180) + 10 : 6), y - 7);
       };
       if (info.invalidation) hline(info.invalidation.price, '무효화', '#ff5252', [6, 3]);
       for (const t of info.targets || []) hline(t.price, t.label, color, [2, 4]);
@@ -245,7 +235,7 @@
       let vmax = 0, cmax = 0;
       for (let b = b0; b <= b1; b++) { vmax = Math.max(vmax, p.long[b], p.short[b]); cmax = Math.max(cmax, p.cumLong[b], p.cumShort[b]); }
       if (!vmax) return;
-      const W = g.w * 0.18, nt = m.tiers.length;
+      const W = Math.min(g.w * 0.16, 180), nt = m.tiers.length;
       for (let b = b0; b <= b1; b++) {
         const side = p.long[b] > 0 ? 0 : p.short[b] > 0 ? 1 : -1;
         if (side < 0) continue;
@@ -272,10 +262,6 @@
         ctx.stroke();
       };
       curve(p.cumLong, '#ff8a8f'); curve(p.cumShort, '#86ecc9');
-      ctx.textAlign = 'right'; ctx.fillStyle = '#86ecc9';
-      ctx.fillText('숏 청산 누적 $' + fmtUsd(p.totalShort), g.w - 6, 12);
-      ctx.fillStyle = '#ff8a8f';
-      ctx.fillText('롱 청산 누적 $' + fmtUsd(p.totalLong), g.w - 6, g.h - 10);
     }
   }
 
