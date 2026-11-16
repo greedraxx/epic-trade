@@ -67,9 +67,29 @@
     S.smc = ET.smc.analyze(c.slice(0, -1), { len: S.smcLen });
     S.ew = S.on.ewAuto ? ET.elliott.auto(c, ET.smc.atr(c, 14), { mult: S.ewMult || undefined }) : null;
     resolveManual();
+    computeSignal();
     overlay.refresh();
     renderPanel();
   }
+
+  // 단기 방향 점수. OI·청산 요인은 데이터가 있는 봉에서만 계산된다.
+  function computeSignal() {
+    const c = S.candles;
+    if (c.length < 60 || !S.smc) { S.sig = null; return; }
+    const m = S.liq, cols = m ? overlay._columns() : null;
+    const liqAsym = !m ? null : (i) => {
+      const k = cols[i];
+      if (k == null || k < 0) return NaN;
+      const price = c[i].close, pb = Math.floor((price - m.min) / m.step), w = Math.ceil((price * 0.03) / m.step);
+      let up = 0, dn = 0;
+      for (let b = Math.max(0, pb - w); b <= Math.min(m.n - 1, pb + w); b++) { const v = m.grid[k * m.n + b]; if (b > pb) up += v; else if (b < pb) dn += v; }
+      return up + dn > 0 ? (up - dn) / (up + dn) : NaN;
+    };
+    // OI는 봉 종가 시점 스냅샷(다음 봉 시작 시각)을 쓴다
+    const oiAt = S.oiMap && S.oiMap.size ? (t) => S.oiMap.get(t + S.tfSec) : null;
+    S.sig = ET.signal.analyze(c, { atr: ET.smc.atr(c, 14), structures: S.smc.structures, oiAt, liqAsym });
+  }
+
 
   function resolveManual() {
     const c = S.candles, labels = [];
@@ -113,7 +133,7 @@
       status('세 거래소 모두 캔들을 불러오지 못했습니다.\n' + errs.join('\n') + '\n\n· 인터넷 연결 / 거래소 접속 가능 지역인지 확인\n· 브라우저가 직접 호출을 막는 경우(CORS): `node server.js` 실행 후 http://localhost:8787 접속');
       return;
     }
-    S.candles = c;
+    S.candles = c; S.oiMap = null;
     const prec = c[c.length - 1].close < 1000 ? 2 : 1;
     candleSeries.applyOptions({ priceFormat: { type: 'price', precision: prec, minMove: Math.pow(10, -prec) } });
     candleSeries.setData(c);
@@ -134,6 +154,8 @@
     try {
       const oi = await X[S.source].oiHistory(S.symbol, iv, 1000);
       if (token !== loadToken) return;
+      S.oiMap = new Map(oi.map((r) => [r.time, r.oi]));
+      computeSignal(); renderPanel();
       const times = new Set(S.candles.map((c) => c.time));
       oiSeries.setData(oi.filter((r) => times.has(r.time)).map((r) => ({ time: r.time, value: r.oi })));
     } catch (e) { console.warn('OI', e); }
@@ -153,6 +175,7 @@
     if (token !== loadToken) return;
     for (const r of res) S.exState[r.id] = r.error ? { ok: false, error: r.error } : { ok: true };
     try { S.liq = ET.liqmap.computeMulti(res.filter((r) => !r.error)); } catch (e) { console.warn('liqmap', e); S.liq = null; }
+    computeSignal();
     overlay.refresh();
     renderPanel();
     liqTimer = setTimeout(loadLiq, 120000); // 2분마다 재계산
@@ -247,6 +270,21 @@
   function renderPanel() {
     renderMarket(); renderExchanges();
     const c = S.candles, price = c.length ? c[c.length - 1].close : 0;
+    // 단기 방향
+    if (S.sig) {
+      const g = S.sig, nw = g.now, cls = (v) => (v > 0 ? 'up' : v < 0 ? 'dn' : 'mute'), sg = (v) => (isNaN(v) ? '–' : (v > 0 ? '+' : '') + v.toFixed(2));
+      let h = '<div class="row"><b class="' + cls(nw.dir) + '">' + (nw.dir > 0 ? '상승 우위' : nw.dir < 0 ? '하락 우위' : '중립 (신호 없음)') + '</b><span class="' + cls(nw.score) + '">' + sg(nw.score) + '</span></div>';
+      h += nw.parts.map((p) => '<div class="row" title="' + p.desc + '"><span class="mute">' + p.name + '</span><span class="' + cls(p.value) + '">' + (isNaN(p.value) ? '데이터 없음' : sg(p.value)) + '</span></div>').join('');
+      h += '<div class="note" style="margin-top:8px">이 차트 데이터에서의 실제 적중률 (직전 확정봉 기준 점수 → N봉 뒤 종가 방향)</div>';
+      h += '<table class="bt"><tr><th>기간</th><th>신호</th><th>적중률</th><th>순수익</th></tr>' + g.horizons.map((r) => r.n
+        ? '<tr><td>' + r.h + '봉</td><td>' + r.n + '</td><td class="' + (r.lo > 0.5 ? 'up' : '') + '">' + (r.hit * 100).toFixed(1) + '% <span class="mute">±' + (r.ci * 100).toFixed(1) + '</span></td><td class="' + cls(r.net) + '">' + (r.net * 100).toFixed(3) + '%</td></tr>'
+        : '<tr><td>' + r.h + '봉</td><td colspan="3" class="mute">신호 없음</td></tr>').join('') + '</table>';
+      const any = g.horizons.some((r) => r.edge);
+      h += '<div class="note"><b class="' + (any ? 'up' : 'dn') + '">' + (any ? '일부 기간에서 50% 초과가 관측됨' : '통계적으로 50%를 넘는 우위는 확인되지 않음') + '</b> · 순수익은 신호 1회당 평균, 왕복 수수료 ' + (g.fee * 100).toFixed(2) + '% 차감 가정.</div>';
+      h += '<div class="note">요인별 적중률(4봉): ' + g.perFactor.map((r) => r.name + ' ' + (r.n ? (r.hit * 100).toFixed(0) + '%<span class="mute">(' + r.n + ')</span>' : '–')).join(' · ') + '</div>';
+      h += '<div class="note">현재 화면에 불러온 봉만으로 잰 값입니다. 표본이 작고 시장 국면이 바뀌면 달라지며, 과거 적중률이 미래를 보장하지 않습니다.</div>';
+      $('pSig').innerHTML = h;
+    } else $('pSig').innerHTML = '<div class="mute">계산 중…</div>';
     // 청산 밀집
     if (S.liq && price) {
       const cl = ET.liqmap.clusters(S.liq, price, 3);

@@ -67,3 +67,7 @@ ul.bad { margin: 4px 0 0; padding-left: 16px; color: var(--dn); }
 #tools button { display: grid; place-items: center; padding: 6px; }
 #tools button.on { background: var(--strong); color: var(--bg); }
 #tools .tsep { height: 1px; background: var(--line); margin: 3px 4px; }
+table.bt { width: 100%; border-collapse: collapse; margin-top: 4px; font-variant-numeric: tabular-nums; }
+table.bt th { font-weight: 500; color: var(--mute); text-align: right; padding: 2px 0; font-size: 11px; }
+table.bt td { text-align: right; padding: 2px 0; color: var(--strong); }
+table.bt th:first-child, table.bt td:first-child { text-align: left; color: var(--mute); }

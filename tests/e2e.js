@@ -156,6 +156,13 @@ const ready = (page) => page.waitForFunction(() => { const S = window.__et && wi
     assert.strictEqual(subs.bybit.length, 3); assert.strictEqual(subs.binance, 1); assert.deepStrictEqual(subs.okx, ['liquidation-orders']);
     assert.ok(Math.abs(s.last - (priceAt(NOW) + 40)) < 0.2, '실시간 캔들 반영');
 
+    // 단기 방향 점수와 자체 백테스트
+    await page.waitForFunction(() => window.__et.S.sig && window.__et.S.oiMap, null, { timeout: 8000 });
+    const sig = await page.evaluate(() => { const g = window.__et.S.sig; return { now: g.now.score, parts: g.now.parts.map((p) => p.key + ":" + p.value.toFixed(2)), oi: window.__et.S.oiMap.size, hz: g.horizons.map((r) => ({ h: r.h, n: r.n, hit: r.hit && +r.hit.toFixed(3), net: r.net && +r.net.toFixed(5) })), text: document.getElementById('pSig').innerText.slice(0, 40) }; });
+    console.log('SIG (모의 데이터 — 수치에 의미 없음)', JSON.stringify(sig));
+    assert.strictEqual(sig.hz.length, 3); assert.ok(sig.hz[0].n > 50);
+    if (process.argv[2]) await page.locator('#panel').screenshot({ path: process.argv[2].replace('.png', '-panel.png') });
+
     // 과거 봉 추가 로딩
     await page.evaluate(() => window.__et.chart.timeScale().setVisibleLogicalRange({ from: -50, to: 300 }));
     await page.waitForFunction(() => window.__et.S.candles.length === 2000, null, { timeout: 8000 });

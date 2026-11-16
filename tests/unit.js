@@ -3,7 +3,8 @@ const assert = require('assert');
 require('../js/liqmap.js');
 require('../js/smc.js');
 require('../js/elliott.js');
-const { liqmap, smc, elliott } = globalThis.ET;
+require('../js/signal.js');
+const { liqmap, smc, elliott, signal } = globalThis.ET;
 
 let n = 0;
 const test = (name, fn) => { fn(); n++; console.log('ok  ' + name); };
@@ -135,6 +136,23 @@ test('elliott: 수동 카운트 위반 보고', () => {
   const m = elliott.manual([{ price: 100 }, { price: 120 }, { price: 90 }]);
   assert.strictEqual(m.dir, 1);
   assert.ok(m.violations.length > 0);
+});
+
+test('signal: 미래 정보를 쓰지 않는다 (뒤 봉을 잘라도 과거 점수 동일)', () => {
+  const c = path([100, 130, 115, 150, 120, 160, 140, 170, 125], 25);
+  const run = (cc) => { const s = smc.analyze(cc.slice(0, -1), { len: 3 }); return signal.analyze(cc, { atr: smc.atr(cc, 14), structures: s.structures, oiAt: (t) => 1000 + t / 60, liqAsym: (i) => Math.sin(i) }); };
+  const full = run(c), cut = run(c.slice(0, 120));
+  for (let i = 0; i < 118; i++) assert.ok((isNaN(full.score[i]) && isNaN(cut.score[i])) || Math.abs(full.score[i] - cut.score[i]) < 1e-12, 'bar ' + i);
+  assert.strictEqual(full.now.parts.length, 5);
+});
+
+test('signal: 적중률 계산 — 완벽한 예측은 100%, 반대 예측은 0%, 수수료 차감', () => {
+  const c = path([100, 200], 100), up = new Float64Array(c.length).fill(1), dn = new Float64Array(c.length).fill(-1);
+  const a = signal.evaluate(c, up, 4, 0.25, 0.001, c.length - 2), b = signal.evaluate(c, dn, 4, 0.25, 0.001, c.length - 2);
+  assert.strictEqual(a.hit, 1); assert.strictEqual(b.hit, 0);
+  assert.ok(Math.abs(a.avg - a.net - 0.001) < 1e-12 && b.net < 0 && a.edge && !b.edge);
+  assert.strictEqual(a.nEff, Math.round(a.n / 4), '겹치는 구간은 유효 표본을 줄여서 계산');
+  assert.strictEqual(signal.evaluate(c, new Float64Array(c.length).fill(0.1), 4, 0.25, 0, c.length - 2).n, 0, '임계값 미만은 신호 없음');
 });
 
 console.log('\n' + n + ' tests passed');
